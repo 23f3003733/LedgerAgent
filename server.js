@@ -59,6 +59,7 @@ const querySchema = {
       enum: [
         "revenue",
         "refunds",
+        "average_order_value",
         "order_count",
         "units_sold",
         "top_product_revenue",
@@ -116,21 +117,22 @@ function answerQuestion(query) {
   });
 
   const metric = query.metric;
-  if (metric === "revenue") {
-    selected = selected.filter((order) => order.status === "paid");
-  } else if (metric === "refunds") {
+  const moneyMetric =
+    metric === "revenue" ||
+    metric === "refunds" ||
+    metric === "average_order_value" ||
+    metric.endsWith("_revenue");
+
+  if (metric === "refunds") {
     selected = selected.filter((order) => order.status === "refunded");
-  } else if (
-    metric === "units_sold" ||
-    metric === "top_product_units"
-  ) {
-    selected = selected.filter((order) => order.status === "paid");
-  } else if (metric === "order_count") {
+  } else if (metric === "order_count" || metric === "top_customer_orders") {
     selected = selected.filter((order) => order.status !== "void");
+  } else {
+    selected = selected.filter((order) => order.status === "paid");
   }
 
   function valueFor(order) {
-    if (metric.includes("revenue") || metric === "revenue" || metric === "refunds") {
+    if (moneyMetric) {
       const usd = order.amount * usdPerUnit[order.currency];
       return usd / usdPerUnit[query.currency];
     }
@@ -142,12 +144,13 @@ function answerQuestion(query) {
     if (query.groupBy === "region") return order.region;
     if (query.groupBy === "product") return order.product;
     if (query.groupBy === "customer") return order.customer;
-    if (query.groupBy === "month") return indiaDate(order.created_at).slice(0, 7);
+    if (query.groupBy === "month") {
+      return indiaDate(order.created_at).slice(0, 7);
+    }
     return null;
   }
 
-  const isTop = metric.startsWith("top_");
-  if (isTop) {
+  if (metric.startsWith("top_")) {
     const dimension = metric.includes("product") ? "product" : "customer";
     const totals = new Map();
 
@@ -165,23 +168,36 @@ function answerQuestion(query) {
 
     for (const order of selected) {
       const label = labelFor(order);
-      totals.set(label, (totals.get(label) ?? 0) + valueFor(order));
+      const current = totals.get(label) ?? { sum: 0, count: 0 };
+      current.sum += valueFor(order);
+      current.count += 1;
+      totals.set(label, current);
     }
 
     return Object.fromEntries(
-      [...totals.entries()].map(([label, value]) => [
-        label,
-        metric === "revenue" || metric === "refunds"
-          ? Number(value.toFixed(2))
-          : value,
-      ]),
+      [...totals.entries()].map(([label, item]) => {
+        const value =
+          metric === "average_order_value"
+            ? item.sum / item.count
+            : item.sum;
+
+        return [
+          label,
+          moneyMetric ? Number(value.toFixed(2)) : value,
+        ];
+      }),
     );
   }
 
   const total = selected.reduce((sum, order) => sum + valueFor(order), 0);
-  return metric === "revenue" || metric === "refunds"
-    ? Number(total.toFixed(2))
-    : total;
+
+  if (metric === "average_order_value") {
+    return selected.length
+      ? Number((total / selected.length).toFixed(2))
+      : 0;
+  }
+
+  return moneyMetric ? Number(total.toFixed(2)) : total;
 }
 
 app.post("/ask", async (req, res) => {
@@ -210,6 +226,8 @@ Air Fryer, Toaster, Rice Cooker, Grinder; North, South, East, West, Central.
 Use Asia/Kolkata calendar dates. For a named month, set its first and last date.
 Use USD unless the question requests EUR or INR.
 Revenue means the sum of amount for paid orders. Refunds means refunded orders.
+For average paid order value, choose average_order_value; it is paid revenue
+divided by the number of paid orders.
 For "most", choose the matching top_* metric. Use groupBy only when the
 question asks for a breakdown. Use null for filters the user did not specify.`,
         },
