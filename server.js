@@ -123,7 +123,7 @@ function answerQuestion(query) {
     metric === "average_order_value" ||
     metric.endsWith("_revenue");
 
-  if (metric === "refunds") {
+  if (metric === "refunds" || metric === "refund_count") {
     selected = selected.filter((order) => order.status === "refunded");
   } else if (metric === "order_count" || metric === "top_customer_orders") {
     selected = selected.filter((order) => order.status !== "void");
@@ -225,7 +225,7 @@ Use only the exact product names and regions: Mixer, Blender, Juicer, Kettle,
 Air Fryer, Toaster, Rice Cooker, Grinder; North, South, East, West, Central.
 Use Asia/Kolkata calendar dates. For a named month, set its first and last date.
 Use USD unless the question requests EUR or INR.
-Revenue means the sum of amount for paid orders. Refunds means refunded orders.
+Revenue means the sum of amount for paid orders. Refunds means the total refunded amount. For questions asking how many orders were refunded, choose refund_count.
 For average paid order value, choose average_order_value; it is paid revenue
 divided by the number of paid orders.
 For "most", choose the matching top_* metric. Use groupBy only when the
