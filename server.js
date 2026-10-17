@@ -237,6 +237,13 @@ question asks for a breakdown. Use null for filters the user did not specify.`,
     });
 
     const parsed = JSON.parse(completion.choices[0].message.content);
+    const asksRefundCount =
+      /\b(how many|count|number of)\b/i.test(question) &&
+      /\brefund(?:ed|s)?\b/i.test(question);
+
+    if (asksRefundCount) {
+      parsed.metric = "refund_count";
+    }
     const answer = answerQuestion(parsed);
 
     return res.json({ answer });
