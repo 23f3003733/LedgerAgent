@@ -192,7 +192,7 @@ app.post("/ask", async (req, res) => {
     }
 
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-6-luna",
       response_format: {
         type: "json_schema",
         json_schema: {
