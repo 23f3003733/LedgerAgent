@@ -209,6 +209,7 @@ app.post("/ask", async (req, res) => {
 
     const completion = await openai.chat.completions.create({
       model: "gpt-6-luna",
+      reasoning_effort: "none",
       response_format: {
         type: "json_schema",
         json_schema: {
