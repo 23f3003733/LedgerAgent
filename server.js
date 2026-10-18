@@ -207,6 +207,34 @@ app.post("/ask", async (req, res) => {
       return res.status(400).json({ error: "Send JSON with a question string." });
     }
 
+    const asksCustomerCount =
+        /\b(how many|count|number of)\b/i.test(question) &&
+        /\bcustomers?\b/i.test(question) &&
+        /\b(bought|purchased|ordered)\b/i.test(question);
+
+    if (asksCustomerCount) {
+        const products = [
+            "Mixer", "Blender", "Juicer", "Kettle",
+            "Air Fryer", "Toaster", "Rice Cooker", "Grinder",
+        ];
+        const product = products.find((name) =>
+            question.toLowerCase().includes(name.toLowerCase())
+        );
+
+        const region = ["North", "South", "East", "West", "Central"].find((name) =>
+            new RegExp(`\\b${name}\\b`, "i").test(question)
+        );
+
+        const matchingOrders = orders.filter((order) =>
+            order.status === "paid" &&
+            (!product || order.product === product) &&
+            (!region || order.region === region)
+        );
+
+        return res.json({
+            answer: new Set(matchingOrders.map((order) => order.customer)).size,
+        });
+    }
     const completion = await openai.chat.completions.create({
       model: "gpt-6-luna",
       reasoning_effort: "none",
