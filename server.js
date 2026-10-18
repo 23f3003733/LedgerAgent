@@ -276,6 +276,75 @@ app.post("/ask", async (req, res) => {
 
     return res.json({ answer: count });
     }
+
+    const asksAveragePaidValue =
+        /\baverage\b/i.test(question) &&
+        /\bpaid\b/i.test(question) &&
+        /\b(order value|order amount|value per order)\b/i.test(question);
+
+    if (asksAveragePaidValue) {
+        const regions = ["North", "South", "East", "West", "Central"];
+        const region = regions.find((name) =>
+            new RegExp(`\\b${name}\\b`, "i").test(question)
+        );
+
+        const products = [
+            "Mixer", "Blender", "Juicer", "Kettle",
+            "Air Fryer", "Toaster", "Rice Cooker", "Grinder",
+        ];
+        const product = products.find((name) =>
+            question.toLowerCase().includes(name.toLowerCase())
+        );
+
+        const months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ];
+        const monthIndex = months.findIndex((name) =>
+            new RegExp(`\\b${name}\\b`, "i").test(question)
+        );
+        const yearMatch = question.match(/\b20\d{2}\b/);
+
+        let startDate = null;
+        let endDate = null;
+
+        if (monthIndex !== -1 && yearMatch) {
+            const year = Number(yearMatch[0]);
+            const month = monthIndex + 1;
+            const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+            startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+            endDate = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
+        }
+
+        const currency = /\bEUR\b|euro/i.test(question)
+            ? "EUR"
+            : /\bINR\b|rupee/i.test(question)
+            ? "INR"
+            : "USD";
+
+        const matchingOrders = orders.filter((order) => {
+            const date = indiaDate(order.created_at);
+            return (
+            order.status === "paid" &&
+            (!region || order.region === region) &&
+            (!product || order.product === product) &&
+            (!startDate || date >= startDate) &&
+            (!endDate || date <= endDate)
+            );
+        });
+
+        const total = matchingOrders.reduce((sum, order) => {
+            const usd = order.amount * usdPerUnit[order.currency];
+            return sum + usd / usdPerUnit[currency];
+        }, 0);
+
+        const average = matchingOrders.length
+            ? Number((total / matchingOrders.length).toFixed(2))
+            : 0;
+
+        return res.json({ answer: average });
+    }   
+
     const completion = await openai.chat.completions.create({
       model: "gpt-6-luna",
       reasoning_effort: "none",
