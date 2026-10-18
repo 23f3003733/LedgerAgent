@@ -60,6 +60,7 @@ const querySchema = {
         "revenue",
         "refunds",
         "average_order_value",
+        "refund_count",
         "order_count",
         "units_sold",
         "top_product_revenue",
@@ -344,7 +345,59 @@ app.post("/ask", async (req, res) => {
 
         return res.json({ answer: average });
     }   
+    const asksTopProductRevenue =
+        /\b(which|what)\b/i.test(question) &&
+        /\b(product)\b/i.test(question) &&
+        /\b(most|highest|top)\b/i.test(question) &&
+        /\b(revenue|sales|earned)\b/i.test(question);
 
+    if (asksTopProductRevenue) {
+        const regions = ["North", "South", "East", "West", "Central"];
+        const region = regions.find((name) =>
+            new RegExp(`\\b${name}\\b`, "i").test(question)
+        );
+
+        const months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ];
+        const monthIndex = months.findIndex((name) =>
+            new RegExp(`\\b${name}\\b`, "i").test(question)
+        );
+        const yearMatch = question.match(/\b20\d{2}\b/);
+
+        let startDate = null;
+        let endDate = null;
+
+        if (monthIndex !== -1 && yearMatch) {
+            const year = Number(yearMatch[0]);
+            const month = monthIndex + 1;
+            const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+            startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+            endDate = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
+        }
+
+        const totals = new Map();
+
+        for (const order of orders) {
+            const date = indiaDate(order.created_at);
+
+            if (
+                order.status !== "paid" ||
+                (region && order.region !== region) ||
+                (startDate && date < startDate) ||
+                (endDate && date > endDate)
+            ) {
+                continue;
+            }
+
+            const usd = order.amount * usdPerUnit[order.currency];
+            totals.set(order.product, (totals.get(order.product) ?? 0) + usd);
+        }
+
+        const winner = [...totals.entries()].sort((a, b) => b[1] - a[1])[0];
+        return res.json({ answer: winner ? winner[0] : null });
+    }
     const completion = await openai.chat.completions.create({
       model: "gpt-6-luna",
       reasoning_effort: "none",
