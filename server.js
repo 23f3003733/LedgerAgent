@@ -235,6 +235,49 @@ app.post("/ask", async (req, res) => {
             answer: new Set(matchingOrders.map((order) => order.customer)).size,
         });
     }
+
+    const isRefundCountQuestion =
+        /\b(count|how many|number of)\b/i.test(question) &&
+        /\b(refund(?:ed|s)?|returns?)\b/i.test(question);
+
+    if (isRefundCountQuestion) {
+    const regions = ["North", "South", "East", "West", "Central"];
+    const region = regions.find((name) =>
+        new RegExp(`\\b${name}\\b`, "i").test(question)
+    );
+
+    const months = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    ];
+    const monthIndex = months.findIndex((name) =>
+        new RegExp(`\\b${name}\\b`, "i").test(question)
+    );
+    const yearMatch = question.match(/\b20\d{2}\b/);
+
+    let startDate = null;
+    let endDate = null;
+
+    if (monthIndex !== -1 && yearMatch) {
+        const year = Number(yearMatch[0]);
+        const month = monthIndex + 1;
+        const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+        startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+        endDate = `${year}-${String(month).padStart(2, "0")}-${lastDay}`;
+    }
+
+    const count = orders.filter((order) => {
+        const date = indiaDate(order.created_at);
+        return (
+        order.status === "refunded" &&
+        (!region || order.region === region) &&
+        (!startDate || date >= startDate) &&
+        (!endDate || date <= endDate)
+        );
+    }).length;
+
+    return res.json({ answer: count });
+    }
     const completion = await openai.chat.completions.create({
       model: "gpt-6-luna",
       reasoning_effort: "none",
