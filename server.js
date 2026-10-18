@@ -5,7 +5,7 @@ import OpenAI from "openai";
 const app = express();
 app.use(express.json());
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 10000, maxRetries: 0 });
 
 let orders = [];
 let usdPerUnit = {};
@@ -92,13 +92,104 @@ const querySchema = {
   ],
 };
 
-function indiaDate(isoDate) {
-  return new Intl.DateTimeFormat("en-CA", {
+const indiaDateFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date(isoDate));
+  });
+
+function indiaDate(isoDate) {
+  return indiaDateFormatter.format(new Date(isoDate));
+}
+
+const REGIONS = ["North", "South", "East", "West", "Central"];
+const PRODUCTS = ["Mixer", "Blender", "Juicer", "Kettle", "Air Fryer", "Toaster", "Rice Cooker", "Grinder"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+function extractFilters(question) {
+  const region = REGIONS.find((name) => new RegExp("\\b" + name + "\\b", "i").test(question)) ?? null;
+  const product = PRODUCTS.find((name) => new RegExp("\\b" + name.replace(/ /g, "\\s+") + "\\b", "i").test(question)) ?? null;
+  const monthIndex = MONTHS.findIndex((name) => new RegExp("\\b" + name + "\\b", "i").test(question));
+  const yearMatch = question.match(/\b20\d{2}\b/);
+  let startDate = null;
+  let endDate = null;
+  if (monthIndex !== -1 && yearMatch) {
+    const year = Number(yearMatch[0]);
+    const month = monthIndex + 1;
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    startDate = year + "-" + String(month).padStart(2, "0") + "-01";
+    endDate = year + "-" + String(month).padStart(2, "0") + "-" + lastDay;
+  }
+  const currency = /\bEUR\b|euro/i.test(question)
+    ? "EUR"
+    : /\bINR\b|rupees?\b/i.test(question)
+    ? "INR"
+    : "USD";
+  return { region, product, startDate, endDate, currency };
+}
+
+function answerCommonQuestion(question) {
+  const q = question.toLowerCase();
+  const filters = extractFilters(question);
+  const selected = orders.filter((order) => {
+    const date = indiaDate(order.created_at);
+    return (
+      (!filters.region || order.region.toLowerCase() === filters.region.toLowerCase()) &&
+      (!filters.product || order.product.toLowerCase() === filters.product.toLowerCase()) &&
+      (!filters.startDate || date >= filters.startDate) &&
+      (!filters.endDate || date <= filters.endDate)
+    );
+  });
+
+  const asksCustomerCount =
+    /\bcustomers?\b/.test(q) &&
+    /\b(how many|count|number of|distinct|different|unique)\b/.test(q) &&
+    /\b(bought|purchased|ordered|placed|made|paid)\b/.test(q);
+  if (asksCustomerCount && filters.product) {
+    const customers = new Set(
+      selected.filter((order) => order.status === "paid").map((order) => order.customer)
+    );
+    return { handled: true, answer: customers.size };
+  }
+
+  const asksCount = /\b(how many|count|number of)\b/.test(q);
+  const asksRefund = /\b(refund(?:ed|s)?|returns?)\b/.test(q);
+  if (asksCount && asksRefund) {
+    return {
+      handled: true,
+      answer: selected.filter((order) => order.status === "refunded").length,
+    };
+  }
+
+  let metric = null;
+  if (/\b(average|avg)\b/.test(q) && /\b(order|paid|value|amount)\b/.test(q)) {
+    metric = "average_order_value";
+  } else if (/\b(most|highest|top)\b/.test(q) && /\bproduct\b/.test(q) && /\b(revenue|sales|earned|usd)\b/.test(q)) {
+    metric = "top_product_revenue";
+  } else if (/\b(most|highest|top)\b/.test(q) && /\bproduct\b/.test(q) && /\b(units|quantity)\b/.test(q)) {
+    metric = "top_product_units";
+  } else if (/\b(most|highest|top)\b/.test(q) && /\bcustomer\b/.test(q) && /\b(revenue|sales|spent)\b/.test(q)) {
+    metric = "top_customer_revenue";
+  } else if (/\b(most|highest|top)\b/.test(q) && /\bcustomer\b/.test(q) && /\b(orders|purchases)\b/.test(q)) {
+    metric = "top_customer_orders";
+  } else if (/\b(units|quantity)\b/.test(q)) {
+    metric = "units_sold";
+  } else if (asksCount && /\borders?\b/.test(q)) {
+    metric = "order_count";
+  } else if (asksRefund) {
+    metric = "refunds";
+  } else if (/\b(revenue|sales|earn(?:ed|ings?)?|made|brought in)\b/.test(q)) {
+    metric = "revenue";
+  }
+  if (!metric) return { handled: false };
+
+  let groupBy = "none";
+  if (/\b(by|per)\s+region\b/.test(q)) groupBy = "region";
+  else if (/\b(by|per)\s+products?\b/.test(q)) groupBy = "product";
+  else if (/\b(by|per)\s+customers?\b/.test(q)) groupBy = "customer";
+  else if (/\b(by|per)\s+months?\b/.test(q)) groupBy = "month";
+  return { handled: true, answer: answerQuestion({ ...filters, metric, groupBy }) };
 }
 
 function answerQuestion(query) {
@@ -206,6 +297,11 @@ app.post("/ask", async (req, res) => {
     const question = req.body?.question;
     if (typeof question !== "string" || !question.trim()) {
       return res.status(400).json({ error: "Send JSON with a question string." });
+    }
+
+    const commonAnswer = answerCommonQuestion(question);
+    if (commonAnswer.handled) {
+      return res.json({ answer: commonAnswer.answer });
     }
 
     const asksCustomerCount =
