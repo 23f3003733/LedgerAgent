@@ -210,16 +210,14 @@ app.post("/ask", async (req, res) => {
     const asksCustomerCount =
         /\b(how many|count|number of)\b/i.test(question) &&
         /\bcustomers?\b/i.test(question) &&
-        /\b(bought|purchased|ordered)\b/i.test(question);
+        /\b(bought|purchased|ordered|placed|made)\b/i.test(question);
 
-    if (asksCustomerCount) {
-        const products = [
-            "Mixer", "Blender", "Juicer", "Kettle",
-            "Air Fryer", "Toaster", "Rice Cooker", "Grinder",
-        ];
-        const product = products.find((name) =>
-            question.toLowerCase().includes(name.toLowerCase())
+    const productMatch = question.match(
+        /\b(Mixer|Blender|Juicer|Kettle|Air Fryer|Toaster|Rice Cooker|Grinder)\b/i
         );
+
+    if (asksCustomerCount && productMatch) {
+        const product = productMatch[1].toLowerCase();
 
         const region = ["North", "South", "East", "West", "Central"].find((name) =>
             new RegExp(`\\b${name}\\b`, "i").test(question)
@@ -227,7 +225,7 @@ app.post("/ask", async (req, res) => {
 
         const matchingOrders = orders.filter((order) =>
             order.status === "paid" &&
-            (!product || order.product === product) &&
+            order.product.toLowerCase() === product &&
             (!region || order.region === region)
         );
 
